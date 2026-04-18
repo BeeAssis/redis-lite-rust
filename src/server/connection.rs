@@ -6,7 +6,10 @@ use crate::protocol::parser::{resp_protocol_parser, ParserError};
 use crate::protocol::serializer::serialize_resp;
 use crate::protocol::RespType;
 
-pub fn handle_connection(mut stream: TcpStream) {
+use std::sync::Arc;
+use crate::storage::Store;
+
+pub fn handle_connection(mut stream: TcpStream, store:Arc<Store>) {
     let mut incoming_bytes: Vec<u8> = Vec::new();
     let mut response_buffer: Vec<u8> = Vec::new();
 
@@ -27,7 +30,7 @@ pub fn handle_connection(mut stream: TcpStream) {
                     debug_assert!(consumed > 0, "parser returned Ok with zero bytes consumed");
 
                     response_buffer.clear();
-                    build_response(&mut response_buffer, &resp);
+                    build_response(&mut response_buffer, &resp, &store);
 
                     if stream.write_all(&response_buffer).is_err() {
                         return;
@@ -50,7 +53,7 @@ pub fn handle_connection(mut stream: TcpStream) {
     }
 }
 
-fn build_response(out: &mut Vec<u8>, resp: &RespType) {
+fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
     let elements = match resp {
         RespType::Array(elements) => elements,
         _ => {
@@ -77,7 +80,11 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType) {
         handle_ping(out, &elements[1..]);
     } else if command.eq_ignore_ascii_case(b"ECHO") {
         handle_echo(out, &elements[1..]);
-    } else {
+    }else if command.eq_ignore_ascii_case(b"SET"){
+        handle_set(out,&elements[1..],store);
+    } else if command.eq_ignore_ascii_case(b"GET") {
+        handle_get(out, &elements[1..], store);
+    }else {
         let msg = format!(
             "ERR unknown command '{}'",
             String::from_utf8_lossy(command)
@@ -117,7 +124,38 @@ fn handle_echo(out: &mut Vec<u8>, args: &[RespType]) {
     }
 }
 
+fn handle_set(out:&mut Vec<u8>, args:&[RespType], store: &Store){
+    match args {
+        [RespType::BulkString(Some(key)), RespType::BulkString(Some(value))] =>{
+            store.set(key.clone(),value.clone());
+            serialize_resp(out, &RespType::SimpleString("OK".to_string()));
+        }
+        _ =>{
+            serialize_resp(
+                out,
+                &RespType::Error("ERR wrong number of arguements for 'set'".to_string())
+            );
+        }
+    }
+}
+
+fn handle_get(out:&mut Vec<u8>, args: &[RespType],store: &Store){
+    match args{
+        [RespType::BulkString(Some(key))] =>{
+            let value = store.get(key);
+            serialize_resp(out,&RespType::BulkString(value));
+        }
+        _ =>{
+            serialize_resp(
+                out,
+                &RespType::Error("ERR wrong number of arguements for 'set'".to_string())
+            );
+        }
+    }
+}
+
 pub fn run_server() {
+ 
   let listener = match TcpListener::bind("127.0.0.1:6379") {
     Ok(l) => l,
     Err(e) => {
@@ -125,12 +163,16 @@ pub fn run_server() {
         std::process::exit(1);
         }
     };
+
+    let store = Arc::new(Store::new());
+
     println!("Listening on 127.0.0.1:6379");
 
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(move || handle_connection(stream));
+                let store = Arc::clone(&store);
+                thread::spawn(move || handle_connection(stream,store));
             }
             Err(e) => {
                 println!("connection error: {}", e);
@@ -142,41 +184,4 @@ pub fn run_server() {
 
 
 
-// use std::str;
-// use crate::protocol::RespType;
 
-// fn append_len(buf: &mut Vec<u8>, n: usize) {
-//     buf.extend_from_slice(n.to_string().as_bytes());
-// }
-
-// fn append_crlf(buf: &mut Vec<u8>) {
-//     buf.extend_from_slice(b"\r\n");
-// }
-
-
-
-// fn serialize_bulk_string(out: &mut Vec<u8>, data: Option<&[u8]>) {
-//     match data {
-//         Some(bytes) => {
-//             out.push(b'$');
-//             append_len(out, bytes.len());
-//             append_crlf(out);
-//             out.extend_from_slice(bytes);
-//             append_crlf(out);
-//         }
-//         None => out.extend_from_slice(b"$-1\r\n"),
-//     }
-// }
-
-    
-// pub fn serialize_resp(out: &mut Vec<u8>, resp: &RespType) {
-//     match resp {
-//         RespType::SimpleString(s) => todo!(),
-//         RespType::Error(e) => todo!(),
-//         RespType::Integer(i) => todo!(),
-//         RespType::BulkString(opt) => {
-//             serialize_bulk_string(out, opt.as_deref());
-//         }
-//         RespType::Array(elements) => todo!(),
-//     }
-// }
