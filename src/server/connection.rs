@@ -8,6 +8,7 @@ use crate::protocol::RespType;
 
 use std::sync::Arc;
 use crate::storage::Store;
+use std::time::Duration;
 
 pub fn handle_connection(mut stream: TcpStream, store:Arc<Store>) {
     let mut incoming_bytes: Vec<u8> = Vec::new();
@@ -124,16 +125,53 @@ fn handle_echo(out: &mut Vec<u8>, args: &[RespType]) {
     }
 }
 
-fn handle_set(out:&mut Vec<u8>, args:&[RespType], store: &Store){
+fn handle_set(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
     match args {
-        [RespType::BulkString(Some(key)), RespType::BulkString(Some(value))] =>{
-            store.set(key.clone(),value.clone());
+        [RespType::BulkString(Some(key)), RespType::BulkString(Some(value))] => {
+            store.set(key.clone(), value.clone(), None);
             serialize_resp(out, &RespType::SimpleString("OK".to_string()));
         }
-        _ =>{
+
+        [
+            RespType::BulkString(Some(key)),
+            RespType::BulkString(Some(value)),
+            RespType::BulkString(Some(option)),
+            RespType::BulkString(Some(ms_bytes)),
+        ] if option.eq_ignore_ascii_case(b"PX") => {
+            let ms_str = match std::str::from_utf8(ms_bytes) {
+                Ok(s) => s,
+                Err(_) => {
+                    serialize_resp(
+                        out,
+                        &RespType::Error("ERR invalid PX milliseconds".to_string()),
+                    );
+                    return;
+                }
+            };
+
+            let ms = match ms_str.parse::<u64>() {
+                Ok(n) => n,
+                Err(_) => {
+                    serialize_resp(
+                        out,
+                        &RespType::Error("ERR invalid PX milliseconds".to_string()),
+                    );
+                    return;
+                }
+            };
+
+            store.set(
+                key.clone(),
+                value.clone(),
+                Some(Duration::from_millis(ms)),
+            );
+            serialize_resp(out, &RespType::SimpleString("OK".to_string()));
+        }
+
+        _ => {
             serialize_resp(
                 out,
-                &RespType::Error("ERR wrong number of arguements for 'set'".to_string())
+                &RespType::Error("ERR wrong number of arguments for 'set'".to_string()),
             );
         }
     }
