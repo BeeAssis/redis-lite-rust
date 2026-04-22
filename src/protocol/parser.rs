@@ -225,9 +225,7 @@ fn bulk_string_type_parser( resp_as_bytes: &[u8], cursor: usize,) -> Result<(Res
 }
 
 
-pub fn resp_protocol_parser(
-    resp_as_bytes: &[u8],
-    cursor: usize,) -> Result<(RespType, usize), ParserError> {
+pub fn resp_protocol_parser(resp_as_bytes: &[u8],cursor: usize,) -> Result<(RespType, usize), ParserError> {
     let resp_prefix = match resp_as_bytes.get(cursor) {
         Some(b) => *b,
         None => return Err(ParserError::IncompleteInput),

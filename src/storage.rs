@@ -1,15 +1,26 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use std::collections::VecDeque;
+
+enum Value {
+    String(Vec<u8>),
+    List(VecDeque<Vec<u8>>)
+}
 
 
 struct Entry {
-    value: Vec<u8>,
+    value: Value,
     expires_at: Option<Instant>,
 }
 
 pub struct Store {
     inner: Mutex<HashMap<Vec<u8>,Entry>>,
+}
+
+#[derive(Debug)]
+pub enum StoreError{
+    WrongType,
 }
 
 impl Store {
@@ -26,15 +37,16 @@ impl Store {
 
         // .lock() asks for access of protected data
         let mut map = self.inner.lock().unwrap();
+
         map.insert(
             key,
             Entry{
-                value,
+                value: Value::String(value),
                 expires_at
             });
     }
 
-    pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>,StoreError> {
         let mut map = self.inner.lock().unwrap();
 
         let expired = match map.get(key){
@@ -42,14 +54,45 @@ impl Store {
                 Some(deadline) => Instant::now() >= deadline,
                 None => false,
             },
-            None => return None
+            None => return Ok(None)
         };
 
         if expired {
             map.remove(key);
-            return None;
+            return Ok(None);
         }
 
-        map.get(key).map(|entry| entry.value.clone())
+       match &map.get(key).unwrap().value {
+        Value::String(bytes) => Ok(Some(bytes.clone())),
+        Value::List(_) => Err(StoreError::WrongType)
+       }
+    }
+
+    pub fn rpush(&self, key : Vec<u8>, value:Vec<Vec<u8>>)->Result<usize,StoreError>{
+      let mut map = self.inner.lock().unwrap();
+
+       match map.get_mut(&key){
+            Some(entry) => match &mut entry.value{
+                Value::List(list) =>{
+                    list.extend(value);
+                    Ok(list.len())
+                }
+                Value::String(_) =>{
+                    return Err(StoreError::WrongType)
+
+                }          
+            },
+
+            None =>{
+                let mut list = VecDeque::new();
+                list.extend(value);
+                let len = list.len();
+                map.insert(key,Entry{ value: Value::List(list), expires_at: None});
+                Ok(len)
+
+            }
+           
+        }
     }
 }
+
