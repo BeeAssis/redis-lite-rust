@@ -94,5 +94,45 @@ impl Store {
            
         }
     }
-}
+
+    pub fn lrange(&self, key: &[u8], start: i64, stop: i64) -> Result<Vec<Vec<u8>>, StoreError>{
+        let map = self.inner.lock().unwrap();
+
+
+         match &map.get(key){
+             Some(entry) => match &entry.value{
+                Value::List(list) =>{
+                    let len = list.len();
+                    let start_usize = start as usize;
+                    let stop_usize = stop as usize;
+
+                    if start_usize >= len || start > stop {
+                        return Ok(Vec::new());
+                    }
+
+                    let count_usize = stop_usize - start_usize + 1;
+
+                    let result: Vec<Vec<u8>> = list
+                        .iter()
+                        .skip(start_usize)
+                        .take(count_usize)
+                        .cloned()
+                        .collect();
+
+                    Ok(result)
+
+                }
+                Value::String(_) => Err(StoreError::WrongType),
+       
+             },
+             None =>Ok(Vec::new())
+
+            }
+
+
+         }
+
+    }
+
+
 

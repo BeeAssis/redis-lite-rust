@@ -89,6 +89,8 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
         handle_get(out, &elements[1..], store);
     }else if command.eq_ignore_ascii_case(b"RPUSH") {
         handle_rpush(out, &elements[1..], store);
+    }else if command.eq_ignore_ascii_case(b"LRANGE") {
+        handle_lrange(out, &elements[1..], store);
     }else {
         let msg = format!(
             "ERR unknown command '{}'",
@@ -249,6 +251,78 @@ fn handle_rpush(out: &mut Vec<u8>, args:&[RespType], store:&Store){
 
         }
 
+}
+
+fn handle_lrange(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
+    match args {
+        [RespType::BulkString(Some(key)),
+         RespType::BulkString(Some(start_bytes)),
+         RespType::BulkString(Some(stop_bytes))] => {
+
+            // ─── Parse start ───
+            let start: i64 = match std::str::from_utf8(start_bytes) {
+                Ok(s) => match s.parse::<i64>() {
+                    Ok(n) => n,
+                    Err(_) => { 
+                        serialize_resp(out, &RespType::Error(
+                        "ERR value is not an integer or out of range".to_string()
+                    )); 
+                    return;
+                
+                   }
+                },
+                Err(_) => {
+                    serialize_resp(out, &RespType::Error(
+                        "ERR value is not an integer or out of range".to_string()
+                    )); 
+                    return;
+
+                }
+            };
+
+            // ─── Parse stop ───
+            let stop: i64 = match std::str::from_utf8(stop_bytes) {
+                Ok(s) => match s.parse::<i64>() {
+                    Ok(n) => n,
+                    Err(_) => { 
+                         serialize_resp(out, &RespType::Error(
+                        "ERR value is not an integer or out of range".to_string()
+                    )); 
+                    return;
+                    }
+                },
+                Err(_) => { 
+                     serialize_resp(out, &RespType::Error(
+                        "ERR value is not an integer or out of range".to_string()
+                    )); 
+                    return;
+                 }
+            };
+
+            // ─── Call store and handle result ───
+            match store.lrange(key, start, stop) {
+
+                Ok(elements) => { 
+                    let resp_elements: Vec<RespType> = elements
+                    .into_iter()
+                    .map(|bytes| RespType::BulkString(Some(bytes)))
+                    .collect();
+                    serialize_resp(out, &RespType::Array(resp_elements));
+                 }
+                Err(StoreError::WrongType) => { 
+                    serialize_resp(out,&RespType::Error(
+                        "WRONGTYPE Operation against a key holding the wrong kind of value".to_string()
+                    ));
+                 }
+            }
+        }
+
+        _ => {
+            serialize_resp(out, &RespType::Error(
+                "ERR wrong number of arguments for 'lrange'".to_string()
+            ));
+        }
+    }
 }
 
 
