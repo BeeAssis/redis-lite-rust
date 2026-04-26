@@ -99,18 +99,44 @@ impl Store {
         let map = self.inner.lock().unwrap();
 
 
-         match &map.get(key){
+         match map.get(key){
              Some(entry) => match &entry.value{
                 Value::List(list) =>{
-                    let len = list.len();
-                    let start_usize = start as usize;
-                    let stop_usize = stop as usize;
-
-                    if start_usize >= len || start > stop {
+                    let len = list.len() as i64;
+                    if len == 0 {
                         return Ok(Vec::new());
                     }
 
-                    let count_usize = stop_usize - start_usize + 1;
+                    let mut start = start;
+                    let mut stop = stop;
+
+                    
+
+                    if start < 0 {
+                        start = start + len;
+
+                    }
+
+                    if stop < 0{
+                        stop = stop + len;
+                    }
+
+                    if start < 0{
+                        start = 0;
+                    }
+
+                    if stop >= len{
+                        stop = len - 1;
+                    }
+
+                    if stop < start{
+                        return Ok(Vec::new()); 
+
+                    }
+
+                    let start_usize = start as usize;
+                    let count_usize = (stop - start + 1) as usize;
+
 
                     let result: Vec<Vec<u8>> = list
                         .iter()
@@ -120,19 +146,17 @@ impl Store {
                         .collect();
 
                     Ok(result)
-
-                }
+        
+                 }
                 Value::String(_) => Err(StoreError::WrongType),
-       
+             
              },
-             None =>Ok(Vec::new())
-
+               None =>Ok(Vec::new())
             }
-
 
          }
 
-    }
+        }
 
 
 
