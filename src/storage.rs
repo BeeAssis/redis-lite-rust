@@ -204,9 +204,20 @@ impl Store {
        }
     }
 
+    pub fn lpop(&self, key :&[u8] )-> Result<Option<Vec<u8>>, StoreError>{
+      let mut map = self.inner.lock().unwrap();
 
-
+       match map.get_mut(key){
+            Some(entry) => match &mut entry.value{
+                Value::List(list) =>Ok(list.pop_front()),
+                Value::String(_) => Err(StoreError::WrongType)           
+            },
+            None => Ok(None)
+           
+        }
     }
+
+}
 
 
 

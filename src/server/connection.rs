@@ -95,6 +95,8 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
         handle_lpush(out, &elements[1..], store);
     }else if command.eq_ignore_ascii_case(b"LLEN") {
        handle_llen(out, &elements[1..], store);
+   }else if command.eq_ignore_ascii_case(b"LPOP") {
+       handle_lpop(out, &elements[1..], store);
    }else {
         let msg = format!(
             "ERR unknown command '{}'",
@@ -393,6 +395,34 @@ fn handle_llen(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
         _ => {
             serialize_resp(out, &RespType::Error(
                 "ERR wrong number of arguments for 'llen'".to_string()
+            ));
+        }
+    }
+}
+
+fn handle_lpop(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
+    match args {
+        [RespType::BulkString(Some(key))] => {
+            // Call store.llen(key) and handle the Result:
+            match store.lpop(key){
+                Ok(Some(bytes)) =>{
+                    serialize_resp(out,&RespType::BulkString(Some(bytes)));
+                }
+                Ok(None) => {
+                    serialize_resp(out, &RespType::BulkString(None));
+                }
+                Err(StoreError::WrongType) =>{
+                    serialize_resp(out,&RespType::Error(
+                        "WRONGTYPE Operation against a key holding the wrong kind of value".to_string()
+                    ));
+                }
+
+            }
+
+        }
+        _ => {
+            serialize_resp(out, &RespType::Error(
+                "ERR wrong number of arguments for 'lpop'".to_string()
             ));
         }
     }
