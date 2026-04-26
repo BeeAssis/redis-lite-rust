@@ -196,7 +196,7 @@ impl Store {
         
         match map.get(key) {
             Some(entry) => match &entry.value{
-                Value::List(list) => list.len(),
+                Value::List(list) => Ok(list.len()),
                 Value::String(_) => Err(StoreError::WrongType),
             },
             None => Ok(0)
