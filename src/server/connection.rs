@@ -91,6 +91,8 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
         handle_rpush(out, &elements[1..], store);
     }else if command.eq_ignore_ascii_case(b"LRANGE") {
         handle_lrange(out, &elements[1..], store);
+    }else if command.eq_ignore_ascii_case(b"LPUSH") {
+        handle_lpush(out, &elements[1..], store);
     }else {
         let msg = format!(
             "ERR unknown command '{}'",
@@ -323,6 +325,50 @@ fn handle_lrange(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
             ));
         }
     }
+}
+
+fn handle_lpush(out: &mut Vec<u8>, args:&[RespType], store:&Store){
+
+
+    if args.len() < 2 {
+        serialize_resp(out, &RespType::Error(
+            "ERR wrong number of arguments for 'rpush'".to_string()
+        ));
+
+        return;
+    }
+
+    let key = match &args[0]{
+        RespType::BulkString(Some(bytes)) => bytes.clone(),
+        _ => {
+            serialize_resp(out, &RespType::Error("ERR invalid key".to_string()));
+            return;
+        }
+    };
+
+    let mut elements: Vec<Vec<u8>> = Vec::new();
+    for arg in &args[1..]{
+        match arg {
+            RespType::BulkString(Some(bytes)) => elements.push(bytes.clone()),
+            _ => {
+                serialize_resp(out, &RespType::Error("ERR invalid element".to_string()));
+                return;
+            }
+        }
+    }
+
+    match store.lpush(key, elements) {
+        Ok(len) =>{
+            serialize_resp(out,&RespType::Integer(len as i64));
+        }
+        Err(StoreError::WrongType) =>{
+            serialize_resp(out,&RespType::Error(
+                "WRONGTYPE Operation against a key holding the wrong kind of value".to_string()
+            ));
+        }
+
+        }
+
 }
 
 

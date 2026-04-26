@@ -156,7 +156,45 @@ impl Store {
 
          }
 
+
+    pub fn lpush(&self, key : Vec<u8>, value:Vec<Vec<u8>>)->Result<usize,StoreError>{
+      let mut map = self.inner.lock().unwrap();
+
+       match map.get_mut(&key){
+            Some(entry) => match &mut entry.value{
+                Value::List(list) =>{
+                    for v in value{
+                        list.push_front(v);
+                    }
+          
+                    Ok(list.len())
+                }
+                Value::String(_) =>{
+                    return Err(StoreError::WrongType)
+
+                }          
+            },
+
+            None =>{
+                let mut list = VecDeque::new();
+
+                for v in value{
+                    list.push_front(v);
+
+                }
+                let len = list.len();
+                map.insert(key,Entry{ value: Value::List(list), expires_at: None});
+                Ok(len)
+
+            }
+           
         }
+    }
+
+
+
+
+    }
 
 
 
