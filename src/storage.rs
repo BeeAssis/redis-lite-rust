@@ -191,6 +191,18 @@ impl Store {
         }
     }
 
+    pub fn llen(&self, key: &[u8]) -> Result<usize,StoreError> {
+        let mut map = self.inner.lock().unwrap();
+        
+        match map.get(key) {
+            Some(entry) => match &entry.value{
+                Value::List(list) => list.len(),
+                Value::String(_) => Err(StoreError::WrongType),
+            },
+            None => Ok(0)
+       
+       }
+    }
 
 
 

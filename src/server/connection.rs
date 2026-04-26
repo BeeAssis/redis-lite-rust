@@ -93,7 +93,9 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
         handle_lrange(out, &elements[1..], store);
     }else if command.eq_ignore_ascii_case(b"LPUSH") {
         handle_lpush(out, &elements[1..], store);
-    }else {
+    }else if command.eq_ignore_ascii_case(b"LLEN") {
+       handle_llen(out, &elements[1..], store);
+   }else {
         let msg = format!(
             "ERR unknown command '{}'",
             String::from_utf8_lossy(command)
@@ -369,6 +371,31 @@ fn handle_lpush(out: &mut Vec<u8>, args:&[RespType], store:&Store){
 
         }
 
+}
+
+fn handle_llen(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
+    match args {
+        [RespType::BulkString(Some(key))] => {
+            // Call store.llen(key) and handle the Result:
+            match store.llen(key){
+                Ok(len) =>{
+                    serialize_resp(out,&RespType::Integer(len as i64));
+                }
+                Err(StoreError::WrongType) =>{
+                    serialize_resp(out,&RespType::Error(
+                        "WRONGTYPE Operation against a key holding the wrong kind of value".to_string()
+                    ));
+                }
+
+            }
+
+        }
+        _ => {
+            serialize_resp(out, &RespType::Error(
+                "ERR wrong number of arguments for 'llen'".to_string()
+            ));
+        }
+    }
 }
 
 
