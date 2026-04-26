@@ -192,7 +192,7 @@ impl Store {
     }
 
     pub fn llen(&self, key: &[u8]) -> Result<usize,StoreError> {
-        let mut map = self.inner.lock().unwrap();
+        let  map = self.inner.lock().unwrap();
         
         match map.get(key) {
             Some(entry) => match &entry.value{
@@ -204,7 +204,7 @@ impl Store {
        }
     }
 
-    pub fn lpop(&self, key :&[u8] )-> Result<Option<Vec<u8>>, StoreError>{
+    pub fn lpop(&self, key: &[u8] )-> Result<Option<Vec<u8>>, StoreError>{
       let mut map = self.inner.lock().unwrap();
 
        match map.get_mut(key){
@@ -213,6 +213,30 @@ impl Store {
                 Value::String(_) => Err(StoreError::WrongType)           
             },
             None => Ok(None)
+           
+        }
+    }
+
+    pub fn lpop_count(&self, key: &[u8],count: usize )-> Result<Vec<Vec<u8>>, StoreError>{
+      let mut map = self.inner.lock().unwrap();
+
+       match map.get_mut(key){
+            Some(entry) => match &mut entry.value{
+                Value::List(list) =>{
+                    let mut result = Vec::new();
+                    for _ in 0..count{
+                        match list.pop_front(){
+                            Some(v) => result.push(v),
+                            None => break,
+                        }
+                       
+                    }
+                    Ok(result)
+               
+                },
+                Value::String(_) => Err(StoreError::WrongType)           
+            },
+            None => Ok(Vec::new()),
            
         }
     }

@@ -420,6 +420,58 @@ fn handle_lpop(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
             }
 
         }
+        [RespType::BulkString(Some(key)), RespType::BulkString(Some(count_bytes))] => {
+             // new LPOP key count path
+             let count_str = match std::str::from_utf8(count_bytes){
+                Ok(s) => s,
+                Err(_) =>{
+                    serialize_resp(out, &RespType::Error(
+                        "ERR value is not an integer or out of range".to_string()
+                    ));
+                    return;
+                }
+             };
+
+             let count_i64 = match count_str.parse::<i64>(){
+                Ok(n) => n,
+                Err(_) =>{
+                    serialize_resp(out, &RespType::Error(
+                        "ERR value is not an integer or out of range".to_string()
+                    ));
+                    return;
+
+                }
+             };
+
+             if count_i64 < 0 {
+                serialize_resp(out, &RespType::Error(
+                    "ERR value is not an integer or out of range".to_string()
+                ));
+                return;
+            }
+
+            let count = count_i64 as usize;
+
+            match store.lpop_count(key,count){
+                Ok(elements) =>{
+                    let resp_elements: Vec<RespType> = elements
+                    .into_iter()
+                    .map(|bytes| RespType::BulkString(Some(bytes)))
+                    .collect();
+                    serialize_resp(out, &RespType::Array(resp_elements));
+                }
+                Err(StoreError::WrongType) =>{
+                    serialize_resp(out,&RespType::Error(
+                        "WRONGTYPE Operation against a key holding the wrong kind of value".to_string()
+                    ));
+                }
+
+            }
+
+                
+             
+
+        }
         _ => {
             serialize_resp(out, &RespType::Error(
                 "ERR wrong number of arguments for 'lpop'".to_string()
