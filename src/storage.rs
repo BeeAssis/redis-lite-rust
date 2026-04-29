@@ -2,10 +2,16 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
+use std::sync::mpsc::{channel, Sender, Receiver};
 
 enum Value {
     String(Vec<u8>),
     List(VecDeque<Vec<u8>>)
+}
+
+pub enum BlpopResult {
+    Popped(Vec<u8>),
+    Waiting(Receiver<Vec<u8>>),
 }
 
 
@@ -14,8 +20,13 @@ struct Entry {
     expires_at: Option<Instant>,
 }
 
+struct Inner {
+    map: HashMap<Vec<u8>, Entry>,
+    waiters: HashMap<Vec<u8>, VecDeque<Sender<Vec<u8>>>>,
+}
+
 pub struct Store {
-    inner: Mutex<HashMap<Vec<u8>,Entry>>,
+    inner: Mutex<Inner>,
 }
 
 #[derive(Debug)]
@@ -26,8 +37,10 @@ pub enum StoreError{
 impl Store {
     pub fn new() -> Self {
         Self {
-            // Creates table that can only be accessed by one thread at a time
-            inner: Mutex::new(HashMap::new()),
+            inner: Mutex::new(Inner {
+                map: HashMap::new(),
+                waiters: HashMap::new(),
+            }),
         }
     }
 
@@ -36,9 +49,9 @@ impl Store {
         let expires_at = ttl.map(|d| Instant::now() + d);
 
         // .lock() asks for access of protected data
-        let mut map = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
-        map.insert(
+        inner.map.insert(
             key,
             Entry{
                 value: Value::String(value),
@@ -47,9 +60,9 @@ impl Store {
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>,StoreError> {
-        let mut map = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
 
-        let expired = match map.get(key){
+        let expired = match inner.map.get(key){
             Some(entry) => match entry.expires_at{
                 Some(deadline) => Instant::now() >= deadline,
                 None => false,
@@ -58,24 +71,24 @@ impl Store {
         };
 
         if expired {
-            map.remove(key);
+            inner.map.remove(key);
             return Ok(None);
         }
 
-       match &map.get(key).unwrap().value {
+       match &inner.map.get(key).unwrap().value {
         Value::String(bytes) => Ok(Some(bytes.clone())),
         Value::List(_) => Err(StoreError::WrongType)
        }
     }
 
     pub fn rpush(&self, key : Vec<u8>, value:Vec<Vec<u8>>)->Result<usize,StoreError>{
-      let mut map = self.inner.lock().unwrap();
+      let mut inner = self.inner.lock().unwrap();
 
-       match map.get_mut(&key){
+       let new_len = match inner.map.get_mut(&key){
             Some(entry) => match &mut entry.value{
                 Value::List(list) =>{
                     list.extend(value);
-                    Ok(list.len())
+                    list.len()
                 }
                 Value::String(_) =>{
                     return Err(StoreError::WrongType)
@@ -87,19 +100,57 @@ impl Store {
                 let mut list = VecDeque::new();
                 list.extend(value);
                 let len = list.len();
-                map.insert(key,Entry{ value: Value::List(list), expires_at: None});
-                Ok(len)
+                inner.map.insert(key.clone(),Entry{ value: Value::List(list), expires_at: None});
+                len
 
             }
            
+        };
+
+        loop{
+
+
+            let waiter_queue = match inner.waiters.get_mut(&key){
+                Some(q) => q,
+                None => break,
+            };
+
+            let tx = match waiter_queue.pop_front(){
+                Some(tx) => tx,
+                None => break,
+            };
+
+            let list = match inner.map.get_mut(&key){
+                Some(entry) => match &mut entry.value{
+                    Value::List(list) => list,
+                    _ => break,
+                },
+                None => break,
+            };
+
+            let elem = match list.pop_front(){
+                Some(e) => e,
+                None => {
+                    inner.waiters.get_mut(&key).unwrap().push_front(tx);
+                    break;
+                }
+            };
+
+            let _ = tx.send(elem);
+
+
         }
+
+        Ok(new_len)
+
+
     }
 
     pub fn lrange(&self, key: &[u8], start: i64, stop: i64) -> Result<Vec<Vec<u8>>, StoreError>{
-        let map = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
 
 
-         match map.get(key){
+         match inner.map.get(key){
              Some(entry) => match &entry.value{
                 Value::List(list) =>{
                     let len = list.len() as i64;
@@ -158,16 +209,16 @@ impl Store {
 
 
     pub fn lpush(&self, key : Vec<u8>, value:Vec<Vec<u8>>)->Result<usize,StoreError>{
-      let mut map = self.inner.lock().unwrap();
+      let mut inner = self.inner.lock().unwrap();
 
-       match map.get_mut(&key){
+       let new_len = match inner.map.get_mut(&key){
             Some(entry) => match &mut entry.value{
                 Value::List(list) =>{
                     for v in value{
                         list.push_front(v);
                     }
           
-                    Ok(list.len())
+                    list.len()
                 }
                 Value::String(_) =>{
                     return Err(StoreError::WrongType)
@@ -183,18 +234,55 @@ impl Store {
 
                 }
                 let len = list.len();
-                map.insert(key,Entry{ value: Value::List(list), expires_at: None});
-                Ok(len)
+                inner.map.insert(key.clone(),Entry{ value: Value::List(list), expires_at: None});
+                len
 
             }
            
+        };
+
+         loop{
+
+
+            let waiter_queue = match inner.waiters.get_mut(&key){
+                Some(q) => q,
+                None => break,
+            };
+
+            let tx = match waiter_queue.pop_front(){
+                Some(tx) => tx,
+                None => break,
+            };
+
+            let list = match inner.map.get_mut(&key){
+                Some(entry) => match &mut entry.value{
+                    Value::List(list) => list,
+                    _ => break,
+                },
+                None => break,
+            };
+
+            let elem = match list.pop_front(){
+                Some(e) => e,
+                None => {
+                    inner.waiters.get_mut(&key).unwrap().push_front(tx);
+                    break;
+                }
+            };
+
+            let _ = tx.send(elem);
+
+
         }
+
+        Ok(new_len)
+
     }
 
     pub fn llen(&self, key: &[u8]) -> Result<usize,StoreError> {
-        let  map = self.inner.lock().unwrap();
+        let  inner = self.inner.lock().unwrap();
         
-        match map.get(key) {
+        match inner.map.get(key) {
             Some(entry) => match &entry.value{
                 Value::List(list) => Ok(list.len()),
                 Value::String(_) => Err(StoreError::WrongType),
@@ -205,9 +293,9 @@ impl Store {
     }
 
     pub fn lpop(&self, key: &[u8] )-> Result<Option<Vec<u8>>, StoreError>{
-      let mut map = self.inner.lock().unwrap();
+      let mut inner = self.inner.lock().unwrap();
 
-       match map.get_mut(key){
+       match inner.map.get_mut(key){
             Some(entry) => match &mut entry.value{
                 Value::List(list) =>Ok(list.pop_front()),
                 Value::String(_) => Err(StoreError::WrongType)           
@@ -218,9 +306,9 @@ impl Store {
     }
 
     pub fn lpop_count(&self, key: &[u8],count: usize )-> Result<Vec<Vec<u8>>, StoreError>{
-      let mut map = self.inner.lock().unwrap();
+      let mut inner = self.inner.lock().unwrap();
 
-       match map.get_mut(key){
+       match inner.map.get_mut(key){
             Some(entry) => match &mut entry.value{
                 Value::List(list) =>{
                     let mut result = Vec::new();
@@ -240,6 +328,34 @@ impl Store {
            
         }
     }
+
+    pub fn blpop(&self, key : Vec<u8>) -> Result<BlpopResult,StoreError>{
+         let mut inner = self.inner.lock().unwrap();
+         match inner.map.get_mut(&key){
+            Some(entry) => match &mut entry.value{
+                Value::List(list) => {
+                    if !list.is_empty(){
+                        let elem = list.pop_front().unwrap();
+                        return Ok(BlpopResult::Popped(elem));
+                    }
+                  
+                }
+                 Value::String(_) => {
+                    return Err(StoreError::WrongType);
+                }
+            },
+            None =>{
+
+            },
+         }
+        let (tx, rx) = channel();
+        inner.waiters
+            .entry(key)
+            .or_insert_with(VecDeque::new)
+            .push_back(tx);
+        Ok(BlpopResult::Waiting(rx))
+    }
+   
 
 }
 

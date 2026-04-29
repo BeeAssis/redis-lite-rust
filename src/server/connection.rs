@@ -7,7 +7,7 @@ use crate::protocol::serializer::serialize_resp;
 use crate::protocol::RespType;
 
 use std::sync::Arc;
-use crate::storage::{Store, StoreError};
+use crate::storage::{Store, StoreError, BlpopResult};
 use std::time::Duration;
 
 
@@ -97,6 +97,8 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
        handle_llen(out, &elements[1..], store);
    }else if command.eq_ignore_ascii_case(b"LPOP") {
        handle_lpop(out, &elements[1..], store);
+   }else if command.eq_ignore_ascii_case(b"BLPOP") {
+       handle_blpop(out, &elements[1..], store);
    }else {
         let msg = format!(
             "ERR unknown command '{}'",
@@ -478,6 +480,79 @@ fn handle_lpop(out: &mut Vec<u8>, args: &[RespType], store: &Store) {
             ));
         }
     }
+}
+
+fn handle_blpop(out: &mut Vec<u8>, args:&[RespType], store: &Store){
+
+    let (key,timeout_bytes) = match args {
+        [RespType::BulkString(Some(k)), RespType::BulkString(Some(t))] => (k,t),
+        _ => {
+            serialize_resp(out, &RespType::Error(
+                "ERR wrong number of arguments for 'blpop'".to_string()
+            ));
+            return;
+        }
+
+    };
+
+    let timeout_str = match std::str::from_utf8(timeout_bytes){
+        Ok(s) => s,
+        Err(_) => {
+            serialize_resp(out, &RespType::Error(
+                "ERR invalid timeout".to_string()
+            ));
+            return;
+        }
+    };
+    
+    let timeout_secs = match timeout_str.parse::<f64>(){
+        Ok(n) if n >= 0.0 => n,
+        _ => {
+            serialize_resp(out, &RespType::Error(
+                "ERR timeout is not float or out of range".to_string()
+            ));
+            return;
+        }
+
+    };
+
+    let elem = match store.blpop(key.clone()){
+        Ok(BlpopResult::Popped(elem)) => elem,
+        Ok(BlpopResult::Waiting(rx)) => {
+            if timeout_secs == 0.0 {
+                match rx.recv(){
+                    Ok(elem) => elem,
+                    Err(_) => {
+                        out.extend_from_slice(b"*-1\r\n");
+                        return;
+                    }
+                }
+            }else {
+                let dur = std::time::Duration::from_secs_f64(timeout_secs);
+                match rx.recv_timeout(dur){
+                    Ok(elem) => elem,
+                    Err(_) => {
+                        out.extend_from_slice(b"*-1\r\n");
+                        return;
+                    }
+                }
+            }
+        }
+        Err(StoreError::WrongType) => {
+            serialize_resp(out, &RespType::Error(
+                "WRONGTYPE Operation against a key holding the wrong kind of value".to_string()
+            ));
+            return;
+        }
+    };
+
+    let response = RespType::Array(vec![
+        RespType::BulkString(Some(key.clone())),
+        RespType::BulkString(Some(elem)),
+    ]);
+
+    serialize_resp(out,&response);
+
 }
 
 
