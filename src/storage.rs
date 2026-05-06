@@ -431,7 +431,7 @@ impl Store {
 
         if new_id.ms == 0 && new_id.seq == 0 {
             return Err(StoreError::InvalidStreamId(
-                "ERR the ID specified in XADD must be greater than 0-0".to_string(),
+                "ERR The ID specified in XADD must be greater than 0-0".to_string(),
             ));
         }
 
