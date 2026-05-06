@@ -99,6 +99,8 @@ fn build_response(out: &mut Vec<u8>, resp: &RespType, store: &Store) {
        handle_lpop(out, &elements[1..], store);
    }else if command.eq_ignore_ascii_case(b"BLPOP") {
        handle_blpop(out, &elements[1..], store);
+   }else if command.eq_ignore_ascii_case(b"TYPE") {
+       handle_type(out, &elements[1..], store);
    }else {
         let msg = format!(
             "ERR unknown command '{}'",
@@ -552,6 +554,26 @@ fn handle_blpop(out: &mut Vec<u8>, args:&[RespType], store: &Store){
     ]);
 
     serialize_resp(out,&response);
+
+}
+
+fn handle_type(out: &mut Vec<u8>, args:&[RespType], store: &Store){
+
+    match args{
+        [RespType::BulkString(Some(key))] =>{
+            let type_string = store.type_of(key);
+
+            let response = RespType::SimpleString(type_string.to_string());
+
+            serialize_resp(out, &response);
+
+        },
+        _ => {
+            let error = RespType::Error("ERR wrong number of arguments for 'type' command".to_string());
+            serialize_resp(out,&error)
+        }
+
+    }
 
 }
 

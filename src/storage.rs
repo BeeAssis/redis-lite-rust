@@ -6,13 +6,25 @@ use std::sync::mpsc::{channel, Sender, Receiver};
 
 enum Value {
     String(Vec<u8>),
-    List(VecDeque<Vec<u8>>)
+    List(VecDeque<Vec<u8>>),
+    Stream(Vec<StreamEntry>),
 }
 
 pub enum BlpopResult {
     Popped(Vec<u8>),
     Waiting(Receiver<Vec<u8>>),
 }
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+struct EntryId {
+    ms: u64,
+    seq: u64,
+}
+struct StreamEntry { 
+    id: EntryId, 
+    fields: Vec<(Vec<u8>, Vec<u8>)> 
+}
+
 
 
 struct Entry {
@@ -77,7 +89,8 @@ impl Store {
 
        match &inner.map.get(key).unwrap().value {
         Value::String(bytes) => Ok(Some(bytes.clone())),
-        Value::List(_) => Err(StoreError::WrongType)
+        Value::List(_) => Err(StoreError::WrongType),
+        Value::Stream(_) => Err(StoreError::WrongType),
        }
     }
 
@@ -93,7 +106,10 @@ impl Store {
                 Value::String(_) =>{
                     return Err(StoreError::WrongType)
 
-                }          
+                }   
+                Value::Stream(_) => {
+                    return Err(StoreError::WrongType)
+                }      
             },
 
             None =>{
@@ -200,6 +216,7 @@ impl Store {
         
                  }
                 Value::String(_) => Err(StoreError::WrongType),
+                Value::Stream(_) => Err(StoreError::WrongType)
              
              },
                None =>Ok(Vec::new())
@@ -223,7 +240,10 @@ impl Store {
                 Value::String(_) =>{
                     return Err(StoreError::WrongType)
 
-                }          
+                }        
+                 Value::Stream(_) => {
+                    return Err(StoreError::WrongType)
+                }   
             },
 
             None =>{
@@ -286,6 +306,7 @@ impl Store {
             Some(entry) => match &entry.value{
                 Value::List(list) => Ok(list.len()),
                 Value::String(_) => Err(StoreError::WrongType),
+                Value::Stream(_) => Err(StoreError::WrongType),
             },
             None => Ok(0)
        
@@ -298,7 +319,8 @@ impl Store {
        match inner.map.get_mut(key){
             Some(entry) => match &mut entry.value{
                 Value::List(list) =>Ok(list.pop_front()),
-                Value::String(_) => Err(StoreError::WrongType)           
+                Value::String(_) => Err(StoreError::WrongType),
+                Value::Stream(_) => Err(StoreError::WrongType),           
             },
             None => Ok(None)
            
@@ -322,7 +344,8 @@ impl Store {
                     Ok(result)
                
                 },
-                Value::String(_) => Err(StoreError::WrongType)           
+                Value::String(_) => Err(StoreError::WrongType),
+                Value::Stream(_) => Err(StoreError::WrongType),           
             },
             None => Ok(Vec::new()),
            
@@ -343,6 +366,10 @@ impl Store {
                  Value::String(_) => {
                     return Err(StoreError::WrongType);
                 }
+
+                 Value::Stream(_) => {
+                    return Err(StoreError::WrongType)
+                }   
             },
             None =>{
 
@@ -356,6 +383,30 @@ impl Store {
         Ok(BlpopResult::Waiting(rx))
     }
    
+
+    pub fn type_of(&self, key: &[u8]) -> &'static str{
+        let mut inner = self.inner.lock().unwrap();
+
+        let expired = match inner.map.get(key) {
+            Some(entry) => match entry.expires_at {
+                Some(deadline) => Instant::now() >= deadline,
+                None => false,
+            },
+            None => return "none", // Key doesn't exist at all
+        };
+
+        if expired {
+            inner.map.remove(key);
+            return "none";
+        }
+
+       match &inner.map.get(key).unwrap().value {
+        Value::String(bytes) => "string",
+        Value::List(_) => "list",
+        Value::Stream(_) => "stream",
+       }
+    }
+
 
 }
 
