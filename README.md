@@ -1,34 +1,34 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/72b40a13-64d0-4095-b7bd-1c937ee0d7cb)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# redis-lite-rust
 
-This is a starting point for Rust solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+A partial Redis server implementation in Rust, built as a learning project
+through CodeCrafters' "Build Your Own Redis" challenge. Uses only the Rust
+standard library — no external dependencies.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+## Status
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+Completed through the stream-write stage. Stages beyond XADD (XRANGE, XREAD,
+transactions, replication, RDB persistence) are not implemented.
 
-# Passing the first stage
+## Implemented commands
 
-The entry point for your Redis implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+- **String / connection:** `PING`, `ECHO`, `SET` (with `PX` expiry), `GET`
+- **Lists:** `RPUSH`, `LPUSH`, `LRANGE`, `LLEN`, `LPOP` (with optional count),
+  `BLPOP` (channel-based blocking)
+- **Streams:** `XADD` (explicit, partial-auto, full-auto IDs, with monotonic
+  ID validation)
+- **Generic:** `TYPE`
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+## Architecture
 
-That's all!
+- `protocol/` — RESP parser and serializer, from scratch using only std
+- `server/` — TCP listener, thread-per-connection handler, partial-read
+  buffering
+- `commands/` — command dispatch and per-type handlers
+- `storage/` — in-memory store behind a single `Mutex<Inner>`, with lazy
+  expiration and a waiter queue for BLPOP
 
-# Stage 2 & beyond
+`BLPOP` is the most interesting piece. A blocked client receives a
+`Receiver<Vec<u8>>`; subsequent `RPUSH`/`LPUSH` calls drain the waiter queue
+and hand elements directly to parked senders via channel `send`.
 
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.94)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+## Run
