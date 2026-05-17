@@ -32,3 +32,30 @@ transactions, replication, RDB persistence) are not implemented.
 and hand elements directly to parked senders via channel `send`.
 
 ## Run
+
+```bash
+cargo run --release
+```
+
+Server listens on `127.0.0.1:6379`. Test with `redis-cli`:
+
+```bash
+redis-cli -p 6379 PING
+redis-cli -p 6379 SET foo bar PX 60000
+redis-cli -p 6379 GET foo
+
+redis-cli -p 6379 RPUSH mylist a b c
+redis-cli -p 6379 LRANGE mylist 0 -1
+redis-cli -p 6379 BLPOP mylist 5
+
+redis-cli -p 6379 XADD mystream '*' field1 value1
+redis-cli -p 6379 TYPE mystream
+```
+
+## Acknowledgments
+
+Built through the [CodeCrafters](https://codecrafters.io) "Build Your Own
+Redis" Rust track, which provides staged test specifications and an
+architectural progression. All code in this repository was written in Rust
+against those tests. AI tools (Claude, Cursor) were used during development
+for concept explanation, code suggestions, and debugging.
